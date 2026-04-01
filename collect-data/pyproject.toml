@@ -5,6 +5,9 @@ requires-python = ">=3.14"
 dependencies = [
   "gql[requests]==4.0.0",
 ]
+classifiers = [
+  "Private :: Do Not Upload",
+]
 
 [tool.uv]
 add-bounds = "exact"
