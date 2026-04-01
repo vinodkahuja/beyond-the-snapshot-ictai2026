@@ -7,5 +7,6 @@ dependencies = [
 ]
 
 [tool.uv]
+add-bounds = "exact"
 exclude-newer = "2 weeks"
 no-build = true
