@@ -2,7 +2,9 @@
 name = "dkareh.cis-6910-collect-data"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+  "gql[aiohttp]==4.0.0",
+]
 
 [tool.uv]
 exclude-newer = "2 weeks"
