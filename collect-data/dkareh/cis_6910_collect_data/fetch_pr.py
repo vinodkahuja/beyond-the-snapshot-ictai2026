@@ -27,8 +27,9 @@ def main() -> int:
     )
     client = gql.Client(transport=transport)
 
-    result = client.execute(query)
-    print(result)
+    with client as session:
+        result = session.execute(query)
+        print(result)
     return 0
 
 
