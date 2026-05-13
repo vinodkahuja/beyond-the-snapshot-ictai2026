@@ -1,10 +1,39 @@
+import json
 import sys
+from pathlib import Path
+from typing import NewType
 
 import gql
 from gql.transport.requests import RequestsHTTPTransport
 
+_Cursor = NewType("_Cursor", str)
+type _FullName = tuple[str, str]
+type _Entry = tuple[_FullName, _Cursor | None]
+type _State = list[_Entry]
+
+
+def _load_entry(data) -> _Entry:
+    # Convert lists to tuples.
+    [full_name, cursor] = data
+    return (tuple(full_name), cursor)
+
+
+def _load_state(path: Path) -> _State:
+    with path.open("rb") as file:
+        return list(map(_load_entry, json.load(file)))
+
+
+def _dump_state(path: Path, state: _State):
+    with path.open("w", encoding="utf-8", newline="\n") as file:
+        json.dump(state, file, ensure_ascii=False, separators=(",", ":"))
+
 
 def main() -> int:
+    root_directory = Path(__file__).parent / "../.."
+    state_directory = root_directory / "state"
+    state_path = state_directory / "fetch_pr.json"
+    state = _load_state(state_path)
+
     (owner, name) = ("microsoft", "TypeScript")
     query = gql.GraphQLRequest(
         """
