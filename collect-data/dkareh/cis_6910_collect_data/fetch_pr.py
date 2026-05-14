@@ -3,11 +3,13 @@ import json
 import os
 import sys
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NewType, TextIO
 
 import gql
+from gql.client import SyncClientSession
 from gql.transport.requests import RequestsHTTPTransport
 
 _Cursor = NewType("_Cursor", str)
@@ -42,6 +44,41 @@ def _create_file_map(directory: Path, state: _State):
             file = stack.enter_context(file)
             file_map[full_name] = file
         return (file_map, stack.pop_all().close)
+
+
+@dataclass
+class _Next:
+    cursor: _Cursor
+
+
+@dataclass
+class _Last:
+    pass
+
+
+type _Result = _Next | _Last
+
+
+def _fetch_page(
+    session: SyncClientSession,
+    file: TextIO,
+    entry: _Entry,
+) -> _Result:
+    (full_name, cursor) = entry
+    (owner, name) = full_name
+    query = gql.GraphQLRequest(
+        _QUERY, variable_values={"owner": owner, "name": name, "after": cursor}
+    )
+    result = session.execute(query)
+    page_info = result["repository"]["pullRequests"].pop("pageInfo")
+
+    json.dump(result, file, ensure_ascii=False, separators=(",", ":"))
+    assert file.write("\n") == len("\n")
+    file.flush()
+
+    if page_info["hasNextPage"]:
+        return _Next(cursor=page_info["endCursor"])
+    return _Last()
 
 
 _QUERY = """
@@ -142,24 +179,16 @@ def main() -> int:
         _ = stack.callback(_dump_state, state_path, state)
 
         while state:
-            (full_name, cursor) = state[0]
-            (owner, name) = full_name
-            query = gql.GraphQLRequest(
-                _QUERY, variable_values={"owner": owner, "name": name, "after": cursor}
-            )
-            result = session.execute(query)
-            page_info = result["repository"]["pullRequests"].pop("pageInfo")
-
+            entry = state[0]
+            (full_name, _) = entry
             file = file_map[full_name]
-            json.dump(result, file, ensure_ascii=False, separators=(",", ":"))
-            assert file.write("\n") == len("\n")
-            file.flush()
-
-            if page_info["hasNextPage"]:
-                state[0] = (full_name, page_info["endCursor"])
-                state.rotate(-1)
-            else:
-                _ = state.popleft()
+            result = _fetch_page(session, file, entry)
+            match result:
+                case _Next(cursor=cursor):
+                    state[0] = (full_name, cursor)
+                    state.rotate(-1)
+                case _Last():
+                    _ = state.popleft()
     return 0
 
 
