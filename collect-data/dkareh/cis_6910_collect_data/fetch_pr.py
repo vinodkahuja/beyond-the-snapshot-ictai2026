@@ -49,7 +49,65 @@ _QUERY = """
     repository(owner: $owner, name: $name, followRenames: true) {
       pullRequests(first: 100, after: $after) {
         nodes {
+          additions
+          deletions
+          changedFiles
+          closedAt
+          createdAt
+          headRefName
+          id
+          mergedAt
           permalink
+          state
+          totalCommentsCount
+          timelineItems(first: 100, after: null, itemTypes: [
+            CLOSED_EVENT,
+            HEAD_REF_FORCE_PUSHED_EVENT,
+            ISSUE_COMMENT,
+            MERGED_EVENT,
+            PULL_REQUEST_COMMIT,
+            PULL_REQUEST_REVIEW,
+            REOPENED_EVENT,
+          ]) {
+            nodes {
+              __typename
+              ... on ClosedEvent {
+                createdAt
+                stateReason
+              }
+              ... on HeadRefForcePushedEvent {
+                createdAt
+              }
+              ... on IssueComment {
+                createdAt
+              }
+              ... on MergedEvent {
+                createdAt
+              }
+              ... on PullRequestCommit {
+                commit {
+                  authoredDate
+                  committedDate
+                  # I don't expect any commits to have >10 (co-)authors.
+                  authors(first: 10, after: null) {
+                    nodes {
+                      email
+                      name
+                    }
+                  }
+                }
+              }
+              ... on PullRequestReview {
+                submittedAt
+              }
+              ... on ReopenedEvent {
+                createdAt
+              }
+            }
+            pageInfo {
+              hasNextPage
+            }
+          }
         }
         pageInfo {
           endCursor
@@ -71,7 +129,7 @@ def main() -> int:
     transport = RequestsHTTPTransport(
         url="https://api.github.com/graphql",
         headers={"Authorization": f"Bearer {token}"},
-        timeout=3,
+        timeout=60,
     )
     client = gql.Client(transport=transport)
 
