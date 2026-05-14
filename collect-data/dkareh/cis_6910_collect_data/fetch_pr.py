@@ -45,11 +45,15 @@ def _create_file_map(directory: Path, state: _State):
 
 
 _QUERY = """
-  query PullRequests($owner: String!, $name: String!) {
+  query PullRequests($owner: String!, $name: String!, $after: String) {
     repository(owner: $owner, name: $name, followRenames: true) {
-      pullRequests(first: 100) {
+      pullRequests(first: 100, after: $after) {
         nodes {
           permalink
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
     }
@@ -62,12 +66,6 @@ def main() -> int:
     state_directory = root_directory / "state"
     state_path = state_directory / "fetch_pr.json"
     state = _load_state(state_path)
-
-    (owner, name) = ("microsoft", "TypeScript")
-    query = gql.GraphQLRequest(
-        _QUERY,
-        variable_values={"owner": owner, "name": name},
-    )
 
     token = os.environ["GITHUB_GRAPHQL_TOKEN"]
     transport = RequestsHTTPTransport(
@@ -84,8 +82,21 @@ def main() -> int:
 
         session = stack.enter_context(client)
         _ = stack.callback(_dump_state, state_path, state)
-        result = session.execute(query)
-        print(result)
+
+        while state:
+            (full_name, cursor) = state[0]
+            (owner, name) = full_name
+            query = gql.GraphQLRequest(
+                _QUERY, variable_values={"owner": owner, "name": name, "after": cursor}
+            )
+            result = session.execute(query)
+            page_info = result["repository"]["pullRequests"].pop("pageInfo")
+            print(result)
+            if page_info["hasNextPage"]:
+                state[0] = (full_name, page_info["endCursor"])
+                state.rotate(-1)
+            else:
+                _ = state.popleft()
     return 0
 
 
