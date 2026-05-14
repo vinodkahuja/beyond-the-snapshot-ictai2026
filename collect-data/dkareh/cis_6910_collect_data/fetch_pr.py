@@ -91,7 +91,12 @@ def main() -> int:
             )
             result = session.execute(query)
             page_info = result["repository"]["pullRequests"].pop("pageInfo")
-            print(result)
+
+            file = file_map[full_name]
+            json.dump(result, file, ensure_ascii=False, separators=(",", ":"))
+            assert file.write("\n") == len("\n")
+            file.flush()
+
             if page_info["hasNextPage"]:
                 state[0] = (full_name, page_info["endCursor"])
                 state.rotate(-1)
