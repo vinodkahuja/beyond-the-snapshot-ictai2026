@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from typing import NewType
@@ -53,8 +54,10 @@ def main() -> int:
         variable_values={"owner": owner, "name": name},
     )
 
+    token = os.environ["GITHUB_GRAPHQL_TOKEN"]
     transport = RequestsHTTPTransport(
         url="https://api.github.com/graphql",
+        headers={"Authorization": f"Bearer {token}"},
         timeout=3,
     )
     client = gql.Client(transport=transport)
