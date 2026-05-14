@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sys
@@ -62,7 +63,9 @@ def main() -> int:
     )
     client = gql.Client(transport=transport)
 
-    with client as session:
+    with contextlib.ExitStack() as stack:
+        session = stack.enter_context(client)
+        _ = stack.callback(_dump_state, state_path, state)
         result = session.execute(query)
         print(result)
     return 0
