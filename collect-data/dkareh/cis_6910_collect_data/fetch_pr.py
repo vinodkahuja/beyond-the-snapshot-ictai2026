@@ -28,6 +28,19 @@ def _dump_state(path: Path, state: _State):
         json.dump(state, file, ensure_ascii=False, separators=(",", ":"))
 
 
+_QUERY = """
+  query PullRequests($owner: String!, $name: String!) {
+    repository(owner: $owner, name: $name, followRenames: true) {
+      pullRequests(first: 100) {
+        nodes {
+          permalink
+        }
+      }
+    }
+  }
+"""
+
+
 def main() -> int:
     root_directory = Path(__file__).parent / "../.."
     state_directory = root_directory / "state"
@@ -36,17 +49,7 @@ def main() -> int:
 
     (owner, name) = ("microsoft", "TypeScript")
     query = gql.GraphQLRequest(
-        """
-        query PullRequests($owner: String!, $name: String!) {
-          repository(owner: $owner, name: $name, followRenames: true) {
-            pullRequests(first: 100) {
-              nodes {
-                permalink
-              }
-            }
-          }
-        }
-        """,
+        _QUERY,
         variable_values={"owner": owner, "name": name},
     )
 
