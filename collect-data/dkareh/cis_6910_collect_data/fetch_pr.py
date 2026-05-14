@@ -2,6 +2,7 @@ import contextlib
 import json
 import os
 import sys
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NewType, TextIO
@@ -12,7 +13,7 @@ from gql.transport.requests import RequestsHTTPTransport
 _Cursor = NewType("_Cursor", str)
 type _FullName = tuple[str, str]
 type _Entry = tuple[_FullName, _Cursor | None]
-type _State = list[_Entry]
+type _State = deque[_Entry]
 
 
 def _load_entry(data) -> _Entry:
@@ -23,12 +24,12 @@ def _load_entry(data) -> _Entry:
 
 def _load_state(path: Path) -> _State:
     with path.open("rb") as file:
-        return list(map(_load_entry, json.load(file)))
+        return deque(map(_load_entry, json.load(file)))
 
 
 def _dump_state(path: Path, state: _State):
     with path.open("w", encoding="utf-8", newline="\n") as file:
-        json.dump(state, file, ensure_ascii=False, separators=(",", ":"))
+        json.dump(list(state), file, ensure_ascii=False, separators=(",", ":"))
 
 
 def _create_file_map(directory: Path, state: _State):
