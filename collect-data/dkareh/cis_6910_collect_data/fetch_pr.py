@@ -2,8 +2,9 @@ import contextlib
 import json
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import NewType
+from typing import NewType, TextIO
 
 import gql
 from gql.transport.requests import RequestsHTTPTransport
@@ -28,6 +29,18 @@ def _load_state(path: Path) -> _State:
 def _dump_state(path: Path, state: _State):
     with path.open("w", encoding="utf-8", newline="\n") as file:
         json.dump(state, file, ensure_ascii=False, separators=(",", ":"))
+
+
+def _create_file_map(directory: Path, state: _State):
+    with contextlib.ExitStack() as stack:
+        current_time = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
+        file_map: dict[_FullName, TextIO] = {}
+        for full_name, _ in state:
+            path = directory / f"{'+'.join(full_name)}+{current_time}.jsonl"
+            file = path.open("x", encoding="utf-8", newline="\n")
+            file = stack.enter_context(file)
+            file_map[full_name] = file
+        return (file_map, stack.pop_all().close)
 
 
 _QUERY = """
@@ -64,6 +77,10 @@ def main() -> int:
     client = gql.Client(transport=transport)
 
     with contextlib.ExitStack() as stack:
+        output_directory = root_directory / "output"
+        (file_map, file_map_close) = _create_file_map(output_directory, state)
+        _ = stack.callback(file_map_close)
+
         session = stack.enter_context(client)
         _ = stack.callback(_dump_state, state_path, state)
         result = session.execute(query)
