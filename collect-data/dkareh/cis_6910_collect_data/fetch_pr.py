@@ -84,7 +84,7 @@ def _fetch_page(
 _QUERY = """
   query PullRequests($owner: String!, $name: String!, $after: String) {
     repository(owner: $owner, name: $name, followRenames: true) {
-      pullRequests(first: 100, after: $after) {
+      pullRequests(first: 50, after: $after) {
         nodes {
           additions
           deletions
