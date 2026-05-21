@@ -5,12 +5,11 @@ import sys
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http import HTTPStatus
 from pathlib import Path
 from typing import NewType, TextIO
 
-import gql
-from gql.client import SyncClientSession
-from gql.transport.requests import RequestsHTTPTransport
+import urllib3
 
 _Cursor = NewType("_Cursor", str)
 type _FullName = tuple[str, str]
@@ -47,6 +46,11 @@ def _create_file_map(directory: Path, state: _State):
 
 
 @dataclass
+class _Retry:
+    pass
+
+
+@dataclass
 class _Next:
     cursor: _Cursor
 
@@ -56,20 +60,44 @@ class _Last:
     pass
 
 
-type _Result = _Next | _Last
+type _Result = _Retry | _Next | _Last
 
 
 def _fetch_page(
-    session: SyncClientSession,
+    http: urllib3.PoolManager,
     file: TextIO,
     entry: _Entry,
+    token: str,
 ) -> _Result:
     (full_name, cursor) = entry
     (owner, name) = full_name
-    query = gql.GraphQLRequest(
-        _QUERY, variable_values={"owner": owner, "name": name, "after": cursor}
+    request = {
+        "query": _QUERY,
+        "variables": {"owner": owner, "name": name, "after": cursor},
+    }
+    response = http.request(
+        "POST",
+        "https://api.github.com/graphql",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        json=request,
+        timeout=60,
     )
-    result = session.execute(query)
+
+    status = HTTPStatus(response.status)
+    match status:
+        case HTTPStatus.OK:
+            pass
+        case _:
+            return _Retry()
+
+    result = json.loads(response.data)
+    if result.get("errors"):
+        # Unknown error:
+        return _Retry()
+    result = result["data"]
     page_info = result["repository"]["pullRequests"].pop("pageInfo")
 
     json.dump(result, file, ensure_ascii=False, separators=(",", ":"))
@@ -166,27 +194,23 @@ def main() -> int:
     state = _load_state(state_path)
 
     token = os.environ["GITHUB_GRAPHQL_TOKEN"]
-    transport = RequestsHTTPTransport(
-        url="https://api.github.com/graphql",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=60,
-    )
-    client = gql.Client(transport=transport)
 
     with contextlib.ExitStack() as stack:
         output_directory = root_directory / "output"
         (file_map, file_map_close) = _create_file_map(output_directory, state)
         _ = stack.callback(file_map_close)
 
-        session = stack.enter_context(client)
+        http = stack.enter_context(urllib3.PoolManager())
         _ = stack.callback(_dump_state, state_path, state)
 
         while state:
             entry = state[0]
             (full_name, _) = entry
             file = file_map[full_name]
-            result = _fetch_page(session, file, entry)
+            result = _fetch_page(http, file, entry, token)
             match result:
+                case _Retry():
+                    state.rotate(-1)
                 case _Next(cursor=cursor):
                     state[0] = (full_name, cursor)
                     state.rotate(-1)

@@ -3,9 +3,9 @@ name = "dkareh.cis-6910-collect-data"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
-  "gql[requests]==4.0.0",
   "pyarrow==24.0.0",
   "pyarrow-stubs==20.0.0.20251215",
+  "urllib3==2.6.3",
 ]
 classifiers = [
   "Private :: Do Not Upload",
