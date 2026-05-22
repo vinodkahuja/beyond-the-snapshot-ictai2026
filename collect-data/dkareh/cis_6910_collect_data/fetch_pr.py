@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import NewType, TextIO
 
 import urllib3
+from urllib3.exceptions import HTTPError
 
 _Cursor = NewType("_Cursor", str)
 type _FullName = tuple[str, str]
@@ -207,7 +208,10 @@ def main() -> int:
             entry = state[0]
             (full_name, _) = entry
             file = file_map[full_name]
-            result = _fetch_page(http, file, entry, token)
+            try:
+                result = _fetch_page(http, file, entry, token)
+            except HTTPError:
+                result = _Retry()
             match result:
                 case _Retry():
                     state.rotate(-1)
