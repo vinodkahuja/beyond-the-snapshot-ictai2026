@@ -55,11 +55,12 @@ class _Retry:
 @dataclass
 class _Next:
     cursor: _Cursor
+    cost: int
 
 
 @dataclass
 class _Last:
-    pass
+    cost: int
 
 
 type _Result = _Retry | _Next | _Last
@@ -70,6 +71,7 @@ def _fetch_page(
     file: TextIO,
     entry: _Entry,
     token: str,
+    cost_previous: int | None,
 ) -> _Result:
     (full_name, cursor) = entry
     (owner, name) = full_name
@@ -106,7 +108,7 @@ def _fetch_page(
     remaining = response.headers.get("X-RateLimit-Remaining")
     if seconds := retries.get_retry_after(response):
         till_ready = timedelta(seconds=seconds)
-    elif remaining and int(remaining) == 0 and till_reset:
+    elif remaining and int(remaining) < (cost_previous or 1) and till_reset:
         till_ready = till_reset
 
     # TODO: Implement exponential backoff.
@@ -132,14 +134,15 @@ def _fetch_page(
 
     result = result["data"]
     page_info = result["repository"]["pullRequests"].pop("pageInfo")
+    cost = result.pop("rateLimit")["cost"]
 
     json.dump(result, file, ensure_ascii=False, separators=(",", ":"))
     assert file.write("\n") == len("\n")
     file.flush()
 
     if page_info["hasNextPage"]:
-        return _Next(cursor=page_info["endCursor"])
-    return _Last()
+        return _Next(cursor=page_info["endCursor"], cost=cost)
+    return _Last(cost=cost)
 
 
 def _is_rate_limit_error(error) -> bool:
@@ -222,6 +225,9 @@ _QUERY = """
         }
       }
     }
+    rateLimit {
+      cost
+    }
   }
 """
 
@@ -242,12 +248,15 @@ def main() -> int:
         http = stack.enter_context(urllib3.PoolManager())
         _ = stack.callback(_dump_state, state_path, state)
 
+        # NOTE: If we've already exhausted the current rate limit window, we
+        # won't know the cost of each request until the window resets.
+        cost_previous: int | None = None
         while state:
             entry = state[0]
             (full_name, _) = entry
             file = file_map[full_name]
             try:
-                result = _fetch_page(http, file, entry, token)
+                result = _fetch_page(http, file, entry, token, cost_previous)
             except HTTPError:
                 result = _Retry()
             match result:
@@ -255,10 +264,10 @@ def main() -> int:
                     if delay:
                         time.sleep(delay.total_seconds())
                     state.rotate(-1)
-                case _Next(cursor=cursor):
+                case _Next(cursor=cursor, cost=cost_previous):
                     state[0] = (full_name, cursor)
                     state.rotate(-1)
-                case _Last():
+                case _Last(cost=cost_previous):
                     _ = state.popleft()
     return 0
 
