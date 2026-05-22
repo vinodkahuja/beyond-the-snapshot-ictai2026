@@ -2,9 +2,10 @@ import contextlib
 import json
 import os
 import sys
+import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import NewType, TextIO
@@ -48,7 +49,7 @@ def _create_file_map(directory: Path, state: _State):
 
 @dataclass
 class _Retry:
-    pass
+    delay: timedelta | None = None
 
 
 @dataclass
@@ -94,17 +95,41 @@ def _fetch_page(
         timeout=60,
     )
 
+    # Determine when the current rate limit window resets.
+    till_reset = None
+    if reset := response.headers.get("X-RateLimit-Reset"):
+        reset = datetime.fromtimestamp(int(reset), UTC)
+        till_reset = max(reset - datetime.now(UTC), timedelta())
+
+    # Determine when GitHub is ready for us to retry (if needed).
+    till_ready = None
+    remaining = response.headers.get("X-RateLimit-Remaining")
+    if seconds := retries.get_retry_after(response):
+        till_ready = timedelta(seconds=seconds)
+    elif remaining and int(remaining) == 0 and till_reset:
+        till_ready = till_reset
+
+    # TODO: Implement exponential backoff.
+    delay_fallback = timedelta(minutes=1)
+
     status = HTTPStatus(response.status)
     match status:
         case HTTPStatus.OK:
             pass
+        case HTTPStatus.FORBIDDEN:
+            # We exceeded a secondary rate limit.
+            return _Retry(delay=till_ready or delay_fallback)
         case _:
-            return _Retry()
+            return _Retry(delay=till_ready)
 
     result = json.loads(response.data)
-    if result.get("errors"):
+    if errors := result.get("errors"):
+        if any(map(_is_rate_limit_error, errors)):
+            # We exceeded a rate limit (primary or secondary).
+            return _Retry(delay=till_ready or delay_fallback)
         # Unknown error:
-        return _Retry()
+        return _Retry(delay=till_ready)
+
     result = result["data"]
     page_info = result["repository"]["pullRequests"].pop("pageInfo")
 
@@ -115,6 +140,12 @@ def _fetch_page(
     if page_info["hasNextPage"]:
         return _Next(cursor=page_info["endCursor"])
     return _Last()
+
+
+def _is_rate_limit_error(error) -> bool:
+    types = ["RATE_LIMIT", "RATE_LIMITED"]
+    codes = ["graphql_rate_limit"]
+    return error.get("type") in types or error.get("code") in codes
 
 
 _QUERY = """
@@ -220,7 +251,9 @@ def main() -> int:
             except HTTPError:
                 result = _Retry()
             match result:
-                case _Retry():
+                case _Retry(delay=delay):
+                    if delay:
+                        time.sleep(delay.total_seconds())
                     state.rotate(-1)
                 case _Next(cursor=cursor):
                     state[0] = (full_name, cursor)
