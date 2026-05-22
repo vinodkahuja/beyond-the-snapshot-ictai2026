@@ -76,6 +76,12 @@ def _fetch_page(
         "query": _QUERY,
         "variables": {"owner": owner, "name": name, "after": cursor},
     }
+    retries = urllib3.Retry(
+        status=0,
+        allowed_methods=["POST"],
+        backoff_factor=1,
+        raise_on_status=False,
+    )
     response = http.request(
         "POST",
         "https://api.github.com/graphql",
@@ -84,6 +90,7 @@ def _fetch_page(
             "Authorization": f"Bearer {token}",
         },
         json=request,
+        retries=retries,
         timeout=60,
     )
 
