@@ -40,6 +40,7 @@ def _create_file_map(directory: Path, state: _State):
         current_time = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
         file_map: dict[_FullName, TextIO] = {}
         for full_name, _ in state:
+            # Use the current time to generate (hopefully) unique names.
             path = directory / f"{'+'.join(full_name)}+{current_time}.jsonl"
             file = path.open("x", encoding="utf-8", newline="\n")
             file = stack.enter_context(file)
@@ -199,6 +200,7 @@ _QUERY = """
                   authoredDate
                   committedDate
                   # I don't expect any commits to have >10 (co-)authors.
+                  # NOTE: This assumption turned out to be false.
                   authors(first: 10, after: null) {
                     nodes {
                       email
